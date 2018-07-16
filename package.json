@@ -41,7 +41,8 @@
     "node": ">=8.0.0"
   },
   "browser": {
-    "./lib/fs": "./lib/fs-browser.js"
+    "./lib/fs": "./lib/fs-browser.js",
+    "./lib/inspect": "./lib/inspect-browser.js"
   },
   "browserify": {
     "transform": [
