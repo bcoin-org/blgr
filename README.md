@@ -6,11 +6,15 @@ Node.js logger (used for bcoin).
 
 ``` js
 const blgr = require('blgr');
-const logger = blgr.logger('debug');
+const logger = new blgr('debug');
 
-logger.info('Hello');
-logger.warning('world');
-logger.error('!');
+(async function () {
+  await logger.open();
+
+  logger.info('Hello');
+  logger.warning('world');
+  logger.error('!');
+})();
 ```
 
 ## Contribution and License Agreement
