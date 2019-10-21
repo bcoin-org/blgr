@@ -4,7 +4,17 @@
 'use strict';
 
 const assert = require('bsert');
+const {tmpdir} = require('os');
+const Path = require('path');
+const fs = require('../lib/fs');
 const Logger = require('../lib/logger');
+
+async function tempFile(name) {
+  const time = Date.now();
+  const dir = Path.join(tmpdir(), `blgr-test-${time}`);
+  await fs.mkdir(dir);
+  return Path.join(dir, `${name}.log`);
+};
 
 describe('Logger', function() {
   describe('log', function() {
@@ -241,6 +251,53 @@ describe('Logger', function() {
       assert.equal(called.level, Logger.levels.SPAM);
       assert.equal(called.args.length, 1);
       checkMsg(called.args[0], true, false);
+    });
+  });
+
+ describe('File rotation', function() {
+    let filename;
+    let logger;
+
+    before(async () => {
+      filename = await tempFile('file-size');
+
+      logger = new Logger({
+        level: 'spam',
+        filename: filename,
+        console: false
+      });
+      await logger.open();
+    });
+
+    after(async () => {
+      if (logger.open)
+        await logger.close();
+    });
+
+    it('should get current log file size', async () => {
+      assert.strictEqual(logger._fileSize, 0);
+
+      let perLine = 0;
+      perLine += '[D:2019-10-21T19:58:44Z] '.length; // timestamp
+      perLine += 1;                                  // \n end of every line
+      perLine += 1000;                               // the "message"
+
+      const lines = 1000;
+      for (let i = 0; i < lines; i++) {
+        // 500 bytes = 1000 char hex = 1000 bytes written to log file
+        logger.debug(Buffer.alloc(500).toString('hex'));
+
+        // Keep track of size during operation
+        assert.strictEqual(logger._fileSize, (i + 1) * perLine);
+      }
+
+      // Reset
+      await logger.close();
+      assert.strictEqual(logger._fileSize, 0);
+
+      // Get file size on reopen
+      await logger.open();
+      assert.strictEqual(logger._fileSize, perLine * lines);
     });
   });
 });
