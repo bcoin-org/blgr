@@ -7,6 +7,7 @@ const assert = require('bsert');
 const {tmpdir} = require('os');
 const Path = require('path');
 const fs = require('../lib/fs');
+const native_fs = require('fs');
 const Logger = require('../lib/logger');
 
 async function tempFile(name) {
@@ -270,7 +271,7 @@ describe('Logger', function() {
     });
 
     after(async () => {
-      if (logger.open)
+      if (!logger.closed)
         await logger.close();
     });
 
@@ -298,6 +299,17 @@ describe('Logger', function() {
       // Get file size on reopen
       await logger.open();
       assert.strictEqual(logger._fileSize, perLine * lines);
+    });
+
+    it('should rotate out log file', async () => {
+      const rename = await logger.rotate();
+      assert(native_fs.existsSync(rename));
+      assert(native_fs.existsSync(logger.filename));
+
+      assert.strictEqual(logger._fileSize, 0);
+
+      const stat = native_fs.statSync(logger.filename);
+      assert.strictEqual(stat.size, 0);
     });
   });
 });
