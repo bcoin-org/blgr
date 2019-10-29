@@ -7,7 +7,7 @@ const assert = require('bsert');
 const {tmpdir} = require('os');
 const Path = require('path');
 const fs = require('../lib/fs');
-const native_fs = require('fs');
+const nativeFs = require('fs');
 const Logger = require('../lib/logger');
 
 async function tempFile(name) {
@@ -15,6 +15,22 @@ async function tempFile(name) {
   const dir = Path.join(tmpdir(), `blgr-test-${time}`);
   await fs.mkdir(dir);
   return Path.join(dir, `${name}.log`);
+};
+
+// Prints specified number of 1000-character lines to file.
+// Returns total increase to file size in bytes.
+function logLines(logger, lines) {
+  let perLine = 0;
+  perLine += '[D:2019-10-21T19:58:44Z] '.length; // timestamp
+  perLine += 1;                                  // \n end of every line
+  perLine += 1000;                               // the "message"
+
+  for (let i = 0; i < lines; i++) {
+    // 500 byte buffer -> 1000 char hex -> 1000 bytes written to log file
+    logger.debug(Buffer.alloc(500).toString('hex'));
+  }
+
+  return perLine * lines;
 };
 
 describe('Logger', function() {
@@ -259,7 +275,7 @@ describe('Logger', function() {
     let filename;
     let logger;
 
-    before(async () => {
+    beforeEach(async () => {
       filename = await tempFile('file-size');
 
       logger = new Logger({
@@ -270,7 +286,7 @@ describe('Logger', function() {
       await logger.open();
     });
 
-    after(async () => {
+    afterEach(async () => {
       if (!logger.closed)
         await logger.close();
     });
@@ -278,19 +294,8 @@ describe('Logger', function() {
     it('should get current log file size', async () => {
       assert.strictEqual(logger._fileSize, 0);
 
-      let perLine = 0;
-      perLine += '[D:2019-10-21T19:58:44Z] '.length; // timestamp
-      perLine += 1;                                  // \n end of every line
-      perLine += 1000;                               // the "message"
-
-      const lines = 1000;
-      for (let i = 0; i < lines; i++) {
-        // 500 bytes = 1000 char hex = 1000 bytes written to log file
-        logger.debug(Buffer.alloc(500).toString('hex'));
-
-        // Keep track of size during operation
-        assert.strictEqual(logger._fileSize, (i + 1) * perLine);
-      }
+      const bytes = logLines(logger, 1000);
+      assert.strictEqual(logger._fileSize, bytes);
 
       // Reset
       await logger.close();
@@ -298,18 +303,28 @@ describe('Logger', function() {
 
       // Get file size on reopen
       await logger.open();
-      assert.strictEqual(logger._fileSize, perLine * lines);
+      assert.strictEqual(logger._fileSize, bytes);
     });
 
     it('should rotate out log file', async () => {
-      const rename = await logger.rotate();
-      assert(native_fs.existsSync(rename));
-      assert(native_fs.existsSync(logger.filename));
+      // Write some junk
+      const bytes = logLines(logger, 100);
 
+      // Move current log file to archive file
+      const rename = await logger.rotate();
+      assert(nativeFs.existsSync(rename));
+      assert(nativeFs.existsSync(logger.filename));
+
+      // Archive file should have the junk
+      const stat1 = nativeFs.statSync(rename);
+      assert.strictEqual(stat1.size, bytes);
+
+      // Internal file size property should be reset
       assert.strictEqual(logger._fileSize, 0);
 
-      const stat = native_fs.statSync(logger.filename);
-      assert.strictEqual(stat.size, 0);
+      // New log file should be empty
+      const stat2 = nativeFs.statSync(logger.filename);
+      assert.strictEqual(stat2.size, 0);
     });
   });
 });
