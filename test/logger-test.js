@@ -7,7 +7,6 @@ const assert = require('bsert');
 const {tmpdir} = require('os');
 const Path = require('path');
 const fs = require('../lib/fs');
-const nativeFs = require('fs');
 const Logger = require('../lib/logger');
 
 async function tempFile(name) {
@@ -272,6 +271,7 @@ describe('Logger', function() {
   });
 
  describe('File rotation', function() {
+    this.timeout(10000);
     let filename;
     let logger;
 
@@ -312,19 +312,48 @@ describe('Logger', function() {
 
       // Move current log file to archive file
       const rename = await logger.rotate();
-      assert(nativeFs.existsSync(rename));
-      assert(nativeFs.existsSync(logger.filename));
+      assert(await fs.stat(rename));
+      assert(await fs.stat(logger.filename));
 
       // Archive file should have the junk
-      const stat1 = nativeFs.statSync(rename);
+      const stat1 = await fs.stat(rename);
       assert.strictEqual(stat1.size, bytes);
 
       // Internal file size property should be reset
       assert.strictEqual(logger._fileSize, 0);
 
       // New log file should be empty
-      const stat2 = nativeFs.statSync(logger.filename);
+      const stat2 = await fs.stat(logger.filename);
       assert.strictEqual(stat2.size, 0);
+    });
+
+    it('should rotate out log files when limit is reached', async () => {
+      logger.maxFileSize = 1 << 18; // ~260kB
+
+      let bytes = 0;
+      for (let i = 0; i < 1000; i++) {
+        bytes += logLines(logger, 1);
+        // In practice, we wouldn't be logging thousands of lines in a
+        // single operation. Slow down the test loop so that writeStream()
+        // has a chance to flush to disk and rotate the file out.
+        await new Promise(r => setTimeout(r, 5));
+      }
+
+      await logger.close();
+
+      // Should be 4 files about 260kB each
+      const dir = Path.dirname(logger.filename);
+      const files = await fs.readdir(dir);
+      assert.strictEqual(files.length, 4);
+
+      // With the write loop slowed down, every single byte should be written.
+      let actual = 0;
+      for (const file of files) {
+        const path = Path.join(dir, file);
+        const stat = await fs.stat(path);
+        actual += stat.size;
+      }
+      assert.strictEqual(bytes, actual);
     });
   });
 });
