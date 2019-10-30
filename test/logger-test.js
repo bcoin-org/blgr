@@ -271,7 +271,7 @@ describe('Logger', function() {
   });
 
  describe('File rotation', function() {
-    this.timeout(10000);
+    this.timeout(30000);
     let filename;
     let logger;
 
@@ -354,6 +354,25 @@ describe('Logger', function() {
         actual += stat.size;
       }
       assert.strictEqual(bytes, actual);
+    });
+
+    it('should prune old log files', async () => {
+      logger.maxFileSize = 1 << 18; // ~260kB
+      logger.maxFiles = 4;
+
+      for (let i = 0; i < 2000; i++) {
+        logLines(logger, 1);
+        await new Promise(r => setTimeout(r, 5));
+      }
+
+      await logger.close();
+
+      // 2000 lines of 1000 bytes = 2,000,000 bytes.
+      // With a max file size of ~130k, that should produce 8 files.
+      // After pruning, only 4 archival + 1 current file should remain.
+      const dir = Path.dirname(logger.filename);
+      const files = await fs.readdir(dir);
+      assert.strictEqual(files.length, 5);
     });
   });
 });
