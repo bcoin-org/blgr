@@ -22,13 +22,16 @@ function logLines(logger, lines) {
   let perLine = 0;
   perLine += '[D:2019-10-21T19:58:44Z] '.length; // timestamp
   perLine += 1;                                  // \n end of every line
-  perLine += 1000;                               // the "message"
+  perLine += 14;                                 // Date.now() plus space
+  perLine += 1000;                               // 500 byte Buffer.toString()
 
   for (let i = 0; i < lines; i++) {
-    // 500 byte buffer -> 1000 char hex -> 1000 bytes written to log file
-    logger.debug(Buffer.alloc(500).toString('hex'));
+    logger.debug(
+      Date.now().toString()
+      + ' '
+      + Buffer.alloc(500).toString('hex')
+    );
   }
-
   return perLine * lines;
 };
 
