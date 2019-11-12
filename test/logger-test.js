@@ -274,7 +274,7 @@ describe('Logger', function() {
   });
 
  describe('File rotation', function() {
-    this.timeout(30000);
+    this.timeout(5000);
     let filename;
     let logger;
 
@@ -332,6 +332,7 @@ describe('Logger', function() {
 
     it('should rotate out log files when limit is reached', async () => {
       logger.maxFileSize = 1 << 18; // ~260kB
+      logger.maxFiles = 100; // effectively disable pruning
 
       let bytes = 0;
       for (let i = 0; i < 1000; i++) {
@@ -339,7 +340,7 @@ describe('Logger', function() {
         // In practice, we wouldn't be logging thousands of lines in a
         // single operation. Slow down the test loop so that writeStream()
         // has a chance to flush to disk and rotate the file out.
-        await new Promise(r => setTimeout(r, 5));
+        await new Promise(r => setTimeout(r, 0));
       }
 
       await logger.close();
@@ -365,7 +366,7 @@ describe('Logger', function() {
 
       for (let i = 0; i < 2000; i++) {
         logLines(logger, 1);
-        await new Promise(r => setTimeout(r, 5));
+        await new Promise(r => setTimeout(r, 0));
       }
 
       await logger.close();
