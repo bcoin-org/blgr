@@ -4,7 +4,36 @@
 'use strict';
 
 const assert = require('bsert');
+const {tmpdir} = require('os');
+const Path = require('path');
+const fs = require('../lib/fs');
 const Logger = require('../lib/logger');
+
+async function tempFile(name) {
+  const time = Date.now();
+  const dir = Path.join(tmpdir(), `blgr-test-${time}`);
+  await fs.mkdir(dir);
+  return Path.join(dir, `${name}.log`);
+};
+
+// Prints specified number of 1000-character lines to file.
+// Returns total increase to file size in bytes.
+function logLines(logger, lines) {
+  let perLine = 0;
+  perLine += '[D:2019-10-21T19:58:44Z] '.length; // timestamp
+  perLine += 1;                                  // \n end of every line
+  perLine += 14;                                 // Date.now() plus space
+  perLine += 1000;                               // 500 byte Buffer.toString()
+
+  for (let i = 0; i < lines; i++) {
+    logger.debug(
+      Date.now().toString()
+      + ' '
+      + Buffer.alloc(500).toString('hex')
+    );
+  }
+  return perLine * lines;
+};
 
 describe('Logger', function() {
   describe('log', function() {
@@ -241,6 +270,113 @@ describe('Logger', function() {
       assert.equal(called.level, Logger.levels.SPAM);
       assert.equal(called.args.length, 1);
       checkMsg(called.args[0], true, false);
+    });
+  });
+
+ describe('File rotation', function() {
+    this.timeout(5000);
+    let filename;
+    let logger;
+
+    beforeEach(async () => {
+      filename = await tempFile('file-size');
+
+      logger = new Logger({
+        level: 'spam',
+        filename: filename,
+        console: false
+      });
+      await logger.open();
+    });
+
+    afterEach(async () => {
+      if (!logger.closed)
+        await logger.close();
+    });
+
+    it('should get current log file size', async () => {
+      assert.strictEqual(logger._fileSize, 0);
+
+      const bytes = logLines(logger, 1000);
+      assert.strictEqual(logger._fileSize, bytes);
+
+      // Reset
+      await logger.close();
+      assert.strictEqual(logger._fileSize, 0);
+
+      // Get file size on reopen
+      await logger.open();
+      assert.strictEqual(logger._fileSize, bytes);
+    });
+
+    it('should rotate out log file', async () => {
+      // Write some junk
+      const bytes = logLines(logger, 100);
+
+      // Move current log file to archive file
+      const rename = await logger.rotate();
+      assert(await fs.stat(rename));
+      assert(await fs.stat(logger.filename));
+
+      // Archive file should have the junk
+      const stat1 = await fs.stat(rename);
+      assert.strictEqual(stat1.size, bytes);
+
+      // Internal file size property should be reset
+      assert.strictEqual(logger._fileSize, 0);
+
+      // New log file should be empty
+      const stat2 = await fs.stat(logger.filename);
+      assert.strictEqual(stat2.size, 0);
+    });
+
+    it('should rotate out log files when limit is reached', async () => {
+      logger.maxFileSize = 1 << 18; // ~260kB
+      logger.maxFiles = 100; // effectively disable pruning
+
+      let bytes = 0;
+      for (let i = 0; i < 1000; i++) {
+        bytes += logLines(logger, 1);
+        // In practice, we wouldn't be logging thousands of lines in a
+        // single operation. Slow down the test loop so that writeStream()
+        // has a chance to flush to disk and rotate the file out.
+        await new Promise(r => setTimeout(r, 0));
+      }
+
+      await logger.close();
+
+      // Should be 4 files about 260kB each
+      const dir = Path.dirname(logger.filename);
+      const files = await fs.readdir(dir);
+      assert.strictEqual(files.length, 4);
+
+      // With the write loop slowed down, every single byte should be written.
+      let actual = 0;
+      for (const file of files) {
+        const path = Path.join(dir, file);
+        const stat = await fs.stat(path);
+        actual += stat.size;
+      }
+      assert.strictEqual(bytes, actual);
+    });
+
+    it('should prune old log files', async () => {
+      logger.maxFileSize = 1 << 18; // ~260kB
+      logger.maxFiles = 4;
+
+      for (let i = 0; i < 2000; i++) {
+        logLines(logger, 1);
+        await new Promise(r => setTimeout(r, 0));
+      }
+
+      await logger.close();
+
+      // 2000 lines of 1000 bytes = 2,000,000 bytes.
+      // With a max file size of ~130k, that should produce 8 files.
+      // After pruning, only 4 archival + 1 current file should remain.
+      const dir = Path.dirname(logger.filename);
+      const files = await fs.readdir(dir);
+      assert.strictEqual(files.length, 5);
     });
   });
 });
